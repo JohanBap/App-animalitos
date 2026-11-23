@@ -21,7 +21,10 @@ LOTERIAS_URL = {
 
 def cargar_datos():
     try:
-        return pd.read_csv(ARCHIVO_CSV)
+        df_temp = pd.read_csv(ARCHIVO_CSV)
+        df_temp = df_temp.dropna(subset=["loteria", "fecha", "hora", "animal"])
+        df_temp["animal"] = df_temp["animal"].astype(str).str.strip()
+        return df_temp
     except FileNotFoundError:
         return pd.DataFrame(columns=["loteria", "fecha", "hora", "animal"])
 
@@ -44,7 +47,7 @@ def actualizar_desde_web(df_actual):
                 celdas = [c.get_text(" ", strip=True) for c in fila.find_all(["td", "th"])]
                 if len(celdas) < 8:
                     continue
-                hora = celdas.upper()
+                hora = celdas[0].upper()
                 if not re.match(r"^\d{1,2}:\d{2}\s*[AP]M$", hora):
                     continue
                 for dia_idx in range(7):
@@ -98,19 +101,19 @@ por_dia = datos_lot.groupby("fecha")["animal"].apply(list)
 parejas_counter = Counter()
 
 for lista_dia in por_dia:
-    unicos = sorted(set(lista_dia))
+    unicos = sorted(set(str(x) for x in lista_dia if pd.notna(x)))
     for par in combinations(unicos, 2):
         parejas_counter[par] += 1
 
 def obtener_mejores_socios(animales_base, excluir_salidos=True, top_n=3):
     puntajes = Counter()
-    todos = datos_lot["animal"].unique()
+    todos = [str(x) for x in datos_lot["animal"].unique() if pd.notna(x)]
     for candidato in todos:
         if excluir_salidos and candidato in animales_base:
             continue
         score = 0
         for base in animales_base:
-            par = tuple(sorted([candidato, base]))
+            par = tuple(sorted([str(candidato), str(base)]))
             score += parejas_counter[par]
         if score > 0:
             puntajes[candidato] = score
@@ -126,19 +129,21 @@ with st.chat_message("assistant"):
     else:
         st.write(f"**Pizarra de hoy ({len(salidos_hoy)} sorteos):** " + " ➡️ ".join(salidos_hoy))
 
-        primer_animal = [salidos_hoy]
+        # REGLA 1: Anclada en el primer sorteo (08:00 AM) -> 1 Tripleta
+        primer_animal = [salidos_hoy[0]]
         socios_tripleta = obtener_mejores_socios(primer_animal, excluir_salidos=True, top_n=3)
         if len(socios_tripleta) == 3:
-            t1, t2, t3 = socios_tripleta, socios_tripleta, socios_tripleta
-            st.success(f"🎲 **1 Tripleta del Día (Anclada en {salidos_hoy}):**\n\n### **{t1} — {t2} — {t3}**")
+            t1, t2, t3 = socios_tripleta[0][0], socios_tripleta[1][0], socios_tripleta[2][0]
+            st.success(f"🎲 **1 Tripleta del Día (Anclada en {salidos_hoy[0]}):**\n\n### **{t1} — {t2} — {t3}**")
 
+        # REGLA 2: A partir de los 4 sorteos (11:00 AM) -> 2 Animalitos para la tarde
         if len(salidos_hoy) >= 4:
             top_2 = obtener_mejores_socios(salidos_hoy, excluir_salidos=True, top_n=2)
             if len(top_2) >= 2:
                 st.info(
                     f"🔥 **2 Animalitos para el resto del día (Cruce de los {len(salidos_hoy)} sorteos):**\n\n"
-                    f"1. **{top_2}** *(Índice de coincidencia: {top_2} pts)*\n"
-                    f"2. **{top_2}** *(Índice de coincidencia: {top_2} pts)*"
+                    f"1. **{top_2[0][0]}** *(Índice de coincidencia: {top_2[0][1]} pts)*\n"
+                    f"2. **{top_2[1][0]}** *(Índice de coincidencia: {top_2[1][1]} pts)*"
                 )
         else:
             faltan = 4 - len(salidos_hoy)
